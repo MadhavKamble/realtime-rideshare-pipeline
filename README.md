@@ -179,8 +179,8 @@ python3 --version         # 3.11.x (only needed for local dev / tests)
 ### Step 1 — Clone and configure
 
 ```bash
-git clone <your-repo-url>
-cd ride-sharing
+git clone https://github.com/MadhavKamble/realtime-rideshare-pipeline.git
+cd realtime-rideshare-pipeline
 cp .env.example .env          # defaults are fine for local Docker setup
 ```
 
@@ -237,8 +237,8 @@ Wait ~30 seconds, then the dashboard at http://localhost:8501 will show live Gol
 ### First time setup (run once)
 
 ```bash
-git clone <your-repo-url>
-cd ride-sharing
+git clone https://github.com/MadhavKamble/realtime-rideshare-pipeline.git
+cd realtime-rideshare-pipeline
 cp .env.example .env
 docker compose up -d --build
 ```
@@ -427,78 +427,6 @@ jupyter notebook notebooks/
 | `02_explore_silver.ipynb` | Cleaned data quality, hourly volume charts, revenue by zone |
 | `03_gold_kpi_analysis.ipynb` | Peak/off-peak comparison, revenue heatmap by zone |
 | `04_ml_experimentation.ipynb` | XGBoost training, feature importance, residual analysis, MLflow runs |
-
----
-
-## Before Your Interview — Read This First
-
-A quick summary of what is fully built, what is intentionally simplified, and what
-you need to know so you can answer honestly and confidently.
-
-### What is fully working end-to-end
-
-- **Simulator → Kafka → Spark → Bronze → Silver → Gold → Dashboard** — the complete
-  data pipeline runs with real data (6,800+ Silver rows, 15 Gold rows across 5 zones)
-- **All 4 Airflow DAGs** run clean using the `deltalake` Python library (no PySpark in Airflow)
-- **Redis** is seeded in real-time by `live_writer` (per-event) and pre-warmed every 15 min by Airflow
-- **XGBoost model** trains, logs metrics to MLflow, registers to the model registry, and
-  promotes to Production stage if MAE < 15
-- **Streamlit dashboard** reads live data from Redis and historical data from Gold Delta
-
-### What is intentionally simplified (and why — say this in interviews)
-
-| What the design called for | What we built instead | The honest reason |
-|---|---|---|
-| 5 Gold tables | 1 Gold table (`zone_demand`) | One table covers all dashboard needs; building 4 more would be repetitive with no new concepts |
-| MERGE INTO / UPSERT for Gold | `write_deltalake(mode="overwrite")` | Gold is recomputed fully each hour from Silver — overwrite is simpler and equally correct at this scale |
-| Windowed stream aggregations with watermarks | Append-mode streaming + Airflow batch for aggregations | Watermarks are implemented in concept (simulator sets `event_delay_ms`); aggregations happen in Airflow where they are easier to inspect and retry |
-
-### One thing to activate before demoing the ML part
-
-The surge prediction stream (`surge_prediction_stream.py`) reads Silver in real-time and
-applies the XGBoost model to predict surge. It only activates after the `ml_retrain_dag`
-runs at least once and places a model in the MLflow Production stage.
-
-**To activate it:**
-1. Open Airflow at http://localhost:8080
-2. Trigger `ml_retrain_dag` manually
-3. After it finishes, open MLflow at http://localhost:5000 → Models → `surge_price_model` → confirm version is in Production stage
-
-Until then, the rest of the pipeline (Kafka → Spark → Delta → Airflow → Dashboard) works
-fully without the ML serving component.
-
-### Real bugs we found and fixed (great interview talking points)
-
-These are things that would trip up even senior engineers — knowing about them shows
-production awareness:
-
-1. **Docker named volume vs bind mount (storage split-brain)** — Spark wrote Delta files
-   to one filesystem, Airflow read from a completely different one. Both containers were
-   healthy. Zero error messages. Airflow was computing metrics from Redis estimates and
-   showing green. Fixed by replacing the named `delta_data` volume with a bind mount
-   `./data/delta:/data/delta` shared across all containers.
-
-2. **PySpark in Airflow silently failing** — `spark.jars.packages` couldn't download JARs
-   from Maven inside the container. The SparkSession started anyway without Delta support.
-   `try/except` caught the failure and fell back to Redis. DAGs showed green. Fixed by
-   removing PySpark from Airflow entirely and using the `deltalake` Python library instead.
-
-3. **Dockerfile ENTRYPOINT + Compose command doubling** — Docker Compose `command:` appends
-   to ENTRYPOINT but replaces CMD. Having both caused the container to run the full command
-   twice and crash. Fixed by using `CMD` in all custom Dockerfiles.
-
-4. **`mlflow.sklearn.log_model` on an XGBoost model** — used the wrong MLflow flavour.
-   Fixed to `mlflow.xgboost.log_model`.
-
-5. **`mean_squared_error(squared=False)` removed in scikit-learn 1.3** — parameter was
-   deprecated then deleted. Fixed with `math.sqrt(mean_squared_error(...))`.
-
-### How to answer "is everything production-ready?"
-
-Honestly: *"The architecture is production-grade — the patterns (medallion, checkpointed streaming,
-idempotent DAGs, Redis cache layer, MLflow registry) are exactly what companies like Uber and Ola use.
-The scale is single-machine dev — to go to production I would move Delta to S3, Kafka to Confluent
-Cloud, and Airflow to Kubernetes executor. The code is structured to make those swaps straightforward."*
 
 ---
 
