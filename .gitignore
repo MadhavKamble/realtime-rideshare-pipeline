@@ -8,3 +8,6 @@ data/mlflow/
 .ipynb_checkpoints/
 *.log
 .DS_Store
+LEARNING_GUIDE.md
+PROJECT_JOURNAL.md
+rideshare_analytics_platform.md
