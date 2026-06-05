@@ -1,0 +1,174 @@
+networks:
+  rideshare-net:
+    driver: bridge
+
+volumes:
+  kafka_data:
+  zookeeper_data:
+  redis_data:
+  mlflow_data:
+  airflow_data:
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.6
+    networks: [rideshare-net]
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/bitnami
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "echo srvr | nc localhost 2181 | grep 'Mode:'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.9.6
+    networks: [rideshare-net]
+    ports:
+      - "9092:9092"
+    depends_on:
+      zookeeper:
+        condition: service_started
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka_data:/bitnami
+
+  kafka_init:
+    build:
+      context: .
+      dockerfile: Dockerfile.live_writer
+    networks: [rideshare-net]
+    depends_on: [kafka]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    entrypoint: ["python", "-m", "live_writer.create_topics"]
+
+  redis:
+    image: redis:7.2
+    networks: [rideshare-net]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  spark:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    networks: [rideshare-net]
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./:/app
+      - ./processing:/app/processing
+      - ./ingestion:/app/ingestion
+      - ./storage:/app/storage
+      - ./data/delta:/data/delta
+    environment:
+      PYTHONPATH: /app
+      SPARK_LOCAL_IP: 0.0.0.0
+      DELTA_BRONZE_PATH: /data/delta/bronze
+      DELTA_SILVER_PATH: /data/delta/silver
+      DELTA_GOLD_PATH: /data/delta/gold
+    command: ["bash", "-lc", "python3 -m processing.streaming.run_streaming_pipeline"]
+
+  mlflow:
+    image: python:3.11-slim
+    networks: [rideshare-net]
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: >
+      sh -c "pip install mlflow==2.11.3 && \
+             mlflow server --host 0.0.0.0 --port 5000 \
+             --backend-store-uri /mlflow/tracking \
+             --default-artifact-root /mlflow/artifacts"
+
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    networks: [rideshare-net]
+    ports:
+      - "8080:8080"
+    depends_on: [kafka, redis, spark]
+    volumes:
+      - ./orchestration/dags:/opt/airflow/dags
+      - ./storage:/opt/airflow/storage
+      - ./ml:/opt/airflow/ml
+      - ./processing:/opt/airflow/processing
+      - ./data/delta:/data/delta
+      - airflow_data:/opt/airflow/airflow_data
+    environment:
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow_data/airflow.db
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      PYTHONPATH: /opt/airflow
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      DELTA_BRONZE_PATH: /data/delta/bronze
+      DELTA_SILVER_PATH: /data/delta/silver
+      DELTA_GOLD_PATH: /data/delta/gold
+    command: ["standalone"]
+
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    networks: [rideshare-net]
+    depends_on: [kafka]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./simulator:/app/simulator
+    command: python -m simulator.run_simulator
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    networks: [rideshare-net]
+    ports:
+      - "8501:8501"
+    depends_on: [redis, spark]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DELTA_BRONZE_PATH: /data/delta/bronze
+      DELTA_SILVER_PATH: /data/delta/silver
+      DELTA_GOLD_PATH: /data/delta/gold
+    volumes:
+      - ./dashboard:/app/dashboard
+      - ./storage:/app/storage
+      - ./data/delta:/data/delta
+    command: streamlit run /app/dashboard/app.py --server.port=8501 --server.address=0.0.0.0
+
+  live_writer:
+    build:
+      context: .
+      dockerfile: Dockerfile.live_writer
+    networks: [rideshare-net]
+    depends_on: [kafka, redis]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes:
+      - ./live_writer:/app/live_writer
+      - ./ingestion:/app/ingestion
+      - ./storage:/app/storage
+    command: python -m live_writer.run_live_writer

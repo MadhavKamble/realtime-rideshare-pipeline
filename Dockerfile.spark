@@ -1,0 +1,9 @@
+FROM apache/spark:3.5.1-python3
+
+USER root
+COPY requirements-spark.txt /tmp/requirements-spark.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/requirements-spark.txt
+
+WORKDIR /app
+ENV PYTHONPATH=/app
+COPY . /app

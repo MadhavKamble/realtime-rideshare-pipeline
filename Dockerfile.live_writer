@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements-live-writer.txt /app/requirements-live-writer.txt
+RUN pip install --no-cache-dir -r /app/requirements-live-writer.txt
+COPY live_writer /app/live_writer
+COPY ingestion /app/ingestion
+COPY storage /app/storage
+CMD ["python", "-m", "live_writer.run_live_writer"]

@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+data/delta/
+data/mlflow/
+.ipynb_checkpoints/
+*.log
+.DS_Store

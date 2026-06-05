@@ -1,0 +1,15 @@
+pyspark==3.5.1
+delta-spark==3.1.0
+kafka-python==2.0.2
+redis==5.0.1
+xgboost==2.0.3
+scikit-learn==1.4.2
+mlflow==2.11.3
+apache-airflow==2.8.1
+streamlit==1.32.2
+pandas==2.2.1
+Faker==24.3.0
+pydeck==0.8.1b0
+folium==0.16.0
+pytest==8.2.0
+python-dotenv==1.0.1

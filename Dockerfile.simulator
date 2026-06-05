@@ -1,0 +1,8 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements-simulator.txt /app/requirements-simulator.txt
+RUN pip install --no-cache-dir -r /app/requirements-simulator.txt
+COPY simulator /app/simulator
+COPY ingestion /app/ingestion
+COPY storage /app/storage
+CMD ["python", "-m", "simulator.run_simulator"]
