@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType
 
@@ -21,6 +21,12 @@ from storage.delta_config import (
     SILVER_RIDES_TABLE,
 )
 
+# 10-minute watermark: events arriving more than 10 min late are dropped.
+# Tradeoff: reduces unbounded state accumulation at the cost of losing
+# genuinely late events. For ride-sharing, 10 min is conservative —
+# most late events arrive within 2-3 min.
+WATERMARK_DELAY = "10 minutes"
+
 
 def _ensure_bronze_schema(spark: SparkSession, input_path: str, schema: StructType) -> None:
     delta_log_path = os.path.join(input_path, "_delta_log")
@@ -30,12 +36,22 @@ def _ensure_bronze_schema(spark: SparkSession, input_path: str, schema: StructTy
     spark.createDataFrame([], schema).write.format("delta").mode("overwrite").option("overwriteSchema", "true").save(input_path)
 
 
+def _watermarked_dedup(bronze_df: DataFrame, key_column: str) -> DataFrame:
+    return (
+        bronze_df
+        .withColumn("event_ts", F.to_timestamp("event_timestamp"))
+        .withWatermark("event_ts", WATERMARK_DELAY)
+        .dropDuplicates([key_column, "event_ts"])
+    )
+
+
 def start_bronze_to_silver_stream(input_path: str = BRONZE_RIDES_TABLE, output_path: str = SILVER_RIDES_TABLE):
     spark = build_spark("BronzeToSilverStream")
     _ensure_bronze_schema(spark, input_path, RIDE_SCHEMA)
     checkpoint_path = f"{output_path}/_checkpoints"
     bronze_df = spark.readStream.format("delta").load(input_path)
-    silver_df = transform_bronze_to_silver(bronze_df).withColumn("silver_ingest_ts", F.current_timestamp())
+    watermarked_df = _watermarked_dedup(bronze_df, "ride_id")
+    silver_df = transform_bronze_to_silver(watermarked_df).withColumn("silver_ingest_ts", F.current_timestamp())
     return (
         silver_df.writeStream
         .format("delta")
@@ -52,7 +68,8 @@ def start_bronze_to_silver_drivers_stream(input_path: str = BRONZE_DRIVERS_TABLE
     _ensure_bronze_schema(spark, input_path, DRIVER_SCHEMA)
     checkpoint_path = f"{output_path}/_checkpoints"
     bronze_df = spark.readStream.format("delta").load(input_path)
-    silver_df = transform_bronze_to_silver_drivers(bronze_df).withColumn("silver_ingest_ts", F.current_timestamp())
+    watermarked_df = _watermarked_dedup(bronze_df, "driver_id")
+    silver_df = transform_bronze_to_silver_drivers(watermarked_df).withColumn("silver_ingest_ts", F.current_timestamp())
     return (
         silver_df.writeStream
         .format("delta")
@@ -69,7 +86,8 @@ def start_bronze_to_silver_payments_stream(input_path: str = BRONZE_PAYMENTS_TAB
     _ensure_bronze_schema(spark, input_path, PAYMENT_SCHEMA)
     checkpoint_path = f"{output_path}/_checkpoints"
     bronze_df = spark.readStream.format("delta").load(input_path)
-    silver_df = transform_bronze_to_silver_payments(bronze_df).withColumn("silver_ingest_ts", F.current_timestamp())
+    watermarked_df = _watermarked_dedup(bronze_df, "payment_id")
+    silver_df = transform_bronze_to_silver_payments(watermarked_df).withColumn("silver_ingest_ts", F.current_timestamp())
     return (
         silver_df.writeStream
         .format("delta")
