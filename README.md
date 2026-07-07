@@ -8,6 +8,24 @@ all containerised with Docker Compose.
 
 ---
 
+## Live Screenshots
+
+Captured from a real running stack — simulator generating events, Spark streaming them
+through Bronze/Silver Delta tables, `live_writer` seeding Redis, and the dashboard reading
+both. Not mockups.
+
+| Overview + Live Demand Heatmap | Revenue Analytics | Driver Utilisation |
+|---|---|---|
+| ![Dashboard overview and live demand heatmap](docs/screenshots/dashboard-overview.png) | ![Revenue analytics tab](docs/screenshots/dashboard-revenue.png) | ![Driver utilisation tab](docs/screenshots/dashboard-drivers.png) |
+
+Pipeline Health panel shows the real signals a data engineer would actually check —
+Silver freshness and Gold zone-demand status — not just "the container is up."
+
+Run it yourself: `docker compose up -d --build`, then open `http://localhost:8501`
+(see [Quick Start](#quick-start) below).
+
+---
+
 ## What This Project Demonstrates
 
 | Concern | Tool | What We Actually Do |
