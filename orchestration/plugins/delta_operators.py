@@ -57,7 +57,16 @@ class DeltaMergeOperator(BaseOperator):
         transform_fn = getattr(module, func_name)
         transformed_df = transform_fn(source_df)
 
-        upsert_delta_table(spark, transformed_df, self.target_table_path, self.key_columns)
+        try:
+            upsert_delta_table(spark, transformed_df, self.target_table_path, self.key_columns)
+        except Exception:
+            self.log.exception(
+                "DeltaMergeOperator: MERGE failed for %s → %s on keys %s",
+                self.source_table_path,
+                self.target_table_path,
+                self.key_columns,
+            )
+            raise
         self.log.info(
             "DeltaMergeOperator: merged %s → %s on keys %s",
             self.source_table_path,

@@ -22,7 +22,10 @@ def demo_upsert():
         return
 
     silver_df = transform_bronze_to_silver(bronze_df)
-    upsert_delta_table(spark, silver_df, SILVER_RIDES_TABLE, key_columns=["ride_id"])
+    try:
+        upsert_delta_table(spark, silver_df, SILVER_RIDES_TABLE, key_columns=["ride_id"])
+    except Exception as exc:
+        print(f"MERGE demo failed: {exc}")
 
 
 if __name__ == "__main__":

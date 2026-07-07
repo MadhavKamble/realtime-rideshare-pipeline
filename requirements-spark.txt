@@ -2,4 +2,5 @@
 
 pyspark==3.5.1
 delta-spark==3.1.0
-pandas==2.0.3
+# Must match requirements.txt — both containers train/evaluate models
+pandas==2.2.1

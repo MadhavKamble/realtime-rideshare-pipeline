@@ -32,12 +32,16 @@ def main() -> None:
     print(f"Gold rows to write: {gold_count:,}")
 
     print(f"Upserting to Gold: {GOLD_ZONE_DEMAND_TABLE}")
-    upsert_delta_table(
-        spark,
-        gold_df,
-        GOLD_ZONE_DEMAND_TABLE,
-        key_columns=["event_date", "event_hour", "city_zone"],
-    )
+    try:
+        upsert_delta_table(
+            spark,
+            gold_df,
+            GOLD_ZONE_DEMAND_TABLE,
+            key_columns=["event_date", "event_hour", "city_zone"],
+        )
+    except Exception as exc:
+        print(f"Gold MERGE failed, table left unchanged: {exc}")
+        sys.exit(1)
 
     print(f"Done. Gold zone_demand table now has {gold_count:,} rows.")
 
