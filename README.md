@@ -125,8 +125,13 @@ ride-sharing/
 ├── ml/
 │   ├── feature_engineering.py  pd.get_dummies + numeric prep for XGBoost
 │   ├── train_surge_model.py    XGBRegressor + mlflow.xgboost.log_model
+│   ├── train_surge_model_nyc.py XGBRegressor on NYC data, time-based split
+│   ├── nyc_taxi_loader.py      Downloads + maps NYC TLC parquet to Silver schema
 │   ├── evaluate_model.py       MAE, RMSE (math.sqrt), R² metrics
 │   └── serve_predictions.py    Pandas UDF wrapping MLflow model for Spark serving
+│
+├── common/
+│   └── logging_config.py       Shared structured logger used by processing/batch
 │
 ├── orchestration/
 │   ├── dags/
@@ -154,7 +159,7 @@ ride-sharing/
 ├── Dockerfile.simulator        python:3.11-slim + kafka-python + faker
 ├── Dockerfile.live_writer      python:3.11-slim + kafka-python + redis
 │
-├── requirements-airflow.txt    deltalake, pyarrow, mlflow, xgboost, sklearn, pandas, redis
+├── requirements-airflow.txt    deltalake, pyarrow, mlflow, xgboost, sklearn, pandas, redis, requests
 ├── requirements-spark.txt      pyspark, delta-spark, kafka-python
 ├── requirements-dashboard.txt  streamlit, pydeck, folium, pandas, redis
 ├── requirements-simulator.txt  kafka-python, faker, numpy
@@ -392,6 +397,48 @@ Reading a Delta table requires: deserializing Parquet files, reading the Delta t
 
 Docker Compose's `command:` field **appends** to `ENTRYPOINT` but **replaces** `CMD`. If the Dockerfile uses `ENTRYPOINT ["python"]` and Compose says `command: -m simulator.run_simulator`, Docker runs `python -m simulator.run_simulator`. But if the Dockerfile uses `ENTRYPOINT ["python", "-m", "simulator.run_simulator"]` and Compose also says `command: python -m simulator.run_simulator`, Docker runs `python -m simulator.run_simulator python -m simulator.run_simulator` — doubled and broken. Using `CMD` everywhere means Compose always cleanly overrides.
 
+### Why a synthetic simulator instead of replaying static NYC data for the live path?
+
+The live Kafka → Bronze → Silver path exists to demonstrate real-time stream processing — watermarking, checkpointed exactly-once writes, dedup under backpressure. Replaying a static historical file on a timer would fake the "live" story without exercising any of that: no genuinely unbounded arrival order, no late events, no realistic partition skew. The synthetic simulator generates events with jittered timestamps and a configurable late-arrival rate, so the streaming layer has real out-of-order data to handle. NYC TLC data instead plays a different role — see the next decision.
+
+### Why NYC TLC data for ML training instead of synthetic ride events?
+
+The synthetic simulator's `surge_multiplier` is generated from the same formula the model would be asked to learn (`compute_surge_multiplier` in `simulator/config.py`), so training on it mostly teaches the model to invert a known function — not a realistic fare/distance/tip relationship. NYC TLC data has real fare, distance, and tip patterns, giving the surge model something non-trivial to learn. It's loaded into a separate historical table (`rides_historical_nyc`, not `rides_clean`) rather than merged into the live schema, because NYC's `PULocationID` zone buckets (`zone_A`..`zone_E`) are a different taxonomy from the simulator's named zones (`airport`, `cbd`, `mall`, `railway_station`, `residential`) that the dashboard heatmap and data-quality checks depend on — merging them would silently corrupt zone-based aggregations with five phantom zones that have no coordinates.
+
+### Why a time-based train/test split for the NYC model?
+
+Random split leaks future data into training — a row from January 31st sitting in the training set while a row from January 5th sits in the test set means the model implicitly learns from the future to predict the past, which never happens in production. `ml/train_surge_model_nyc.py` sorts by `event_timestamp` and trains on the first 80% chronologically, testing on the last 20%, which simulates how the model would actually be deployed: trained on the past, evaluated on data it hasn't seen yet.
+
+### Why watermarking is necessary for production streaming
+
+Without a watermark, `dropDuplicates` on a streaming DataFrame keeps state for every key it has ever seen, forever — memory grows unbounded for as long as the query runs. A 10-minute watermark tells Spark it's safe to forget state for any event-time older than (max event-time seen so far − 10 minutes), bounding memory at the cost of dropping any event that arrives later than that. For a ride-sharing pipeline, 10 minutes is a conservative buffer against the simulator's late-event injection (0–120 seconds), so it trades away only intentionally-extreme stragglers.
+
+---
+
+## Known Limitations
+
+- **NYC Taxi data covers 2023-01 only** — the ML model is trained on that single month of yellow taxi trips; the live simulator continues to use synthetic data for the streaming demo, so the two data sources never overlap in time or represent the same city.
+- **Watermark set to 10 minutes** — late events beyond this window are dropped rather than processed, on the Bronze→Silver rides, drivers, and payments streams.
+
+---
+
+## Interview Talking Points
+
+**Q: Why not use PySpark in Airflow?**
+A: PySpark in Airflow silently fell back to a non-Delta-aware session when Maven JAR resolution failed, causing DAGs to run green while reading empty data. Switching to the Rust-backed `deltalake` library eliminated the JVM dependency and reduced per-task startup from ~10s to ~0.3s.
+
+**Q: Why a bind mount instead of a named Docker volume for Delta tables?**
+A: A named volume put Airflow's read path and Spark's write path on two different filesystems, so Airflow always saw an empty table despite Spark writing successfully. A host bind mount at the same absolute path in every container guarantees they're reading and writing the identical files.
+
+**Q: Why generate synthetic events instead of replaying real historical data for the live pipeline?**
+A: Replaying a static file wouldn't exercise genuine out-of-order arrival, late events, or partition skew — the exact conditions the streaming layer (watermarking, dedup, checkpointing) exists to handle. The simulator injects jittered timestamps and a configurable late-arrival rate so the "real-time" story is actually real.
+
+**Q: Why time-based split instead of random split for the NYC model?**
+A: Random split let rows from the end of the month leak into training data used to predict rows from earlier in the month — an information leak that never happens in production, where you only ever have the past to predict the future. Sorting by `event_timestamp` and taking the last 20% as test data reproduces that real deployment constraint. `train_surge_model_nyc.py` prints both MAEs side by side specifically so you can check, on your own run, whether the time-based split's MAE comes out worse — that gap (if present) is the leakage the random split was hiding.
+
+**Q: Why does the streaming pipeline need a watermark at all?**
+A: Structured Streaming's `dropDuplicates` keeps a row of state per key indefinitely unless told otherwise, so a long-running query without a watermark eventually exhausts memory. A 10-minute watermark bounds that state at the cost of dropping events later than 10 minutes past the latest-seen event time — a deliberate tradeoff, since the simulator only ever injects up to 2 minutes of lateness.
+
 ---
 
 ## Running Tests
@@ -407,7 +454,7 @@ pytest tests/ -v
 | Test file | What it covers |
 |---|---|
 | `test_simulator.py` | Event schema, surge bounds stay in `[1.0, 3.5]` |
-| `test_silver_transforms.py` | Dedup, gross_fare_inr computation, event_hour, is_completed flag |
+| `test_silver_transforms.py` | Rides: dedup, gross_fare_inr, event_hour, is_completed. Drivers: dedup, is_available, current_zone cleanup. Payments: dedup, payment_method_clean, is_completed |
 | `test_gold_aggregations.py` | ride_count, completed/cancelled, revenue, avg surge per group |
 | `test_feature_engineering.py` | One-hot encoding, numeric prep, target extraction |
 | `test_data_quality.py` | NULL detection, surge out-of-bounds, empty table handling |
