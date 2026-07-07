@@ -110,6 +110,7 @@ services:
       - ./storage:/opt/airflow/storage
       - ./ml:/opt/airflow/ml
       - ./processing:/opt/airflow/processing
+      - ./common:/opt/airflow/common
       - ./data/delta:/data/delta
       - ./data/nyc_taxi:/opt/airflow/data/nyc_taxi
       - airflow_data:/opt/airflow/airflow_data

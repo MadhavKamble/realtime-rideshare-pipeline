@@ -2,5 +2,8 @@
 
 pyspark==3.5.1
 delta-spark==3.1.0
-# Must match requirements.txt — both containers train/evaluate models
-pandas==2.2.1
+# Pinned below requirements.txt's version: this container's base image
+# (apache/spark:3.5.1-python3) bundles Python 3.8, which has no pandas
+# wheel past 2.0.3. Bumping this to match requirements.txt breaks
+# `docker compose build spark`.
+pandas==2.0.3
