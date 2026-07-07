@@ -5,6 +5,7 @@ __pycache__/
 .env.*
 data/delta/
 data/mlflow/
+data/nyc_taxi/
 .ipynb_checkpoints/
 *.log
 .DS_Store

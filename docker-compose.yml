@@ -111,6 +111,7 @@ services:
       - ./ml:/opt/airflow/ml
       - ./processing:/opt/airflow/processing
       - ./data/delta:/data/delta
+      - ./data/nyc_taxi:/opt/airflow/data/nyc_taxi
       - airflow_data:/opt/airflow/airflow_data
     environment:
       AIRFLOW__CORE__EXECUTOR: SequentialExecutor
@@ -123,6 +124,7 @@ services:
       DELTA_BRONZE_PATH: /data/delta/bronze
       DELTA_SILVER_PATH: /data/delta/silver
       DELTA_GOLD_PATH: /data/delta/gold
+      NYC_TAXI_DATA_DIR: /opt/airflow/data/nyc_taxi
     command: ["standalone"]
 
   simulator:

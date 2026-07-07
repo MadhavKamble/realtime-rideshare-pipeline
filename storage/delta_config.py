@@ -14,5 +14,12 @@ SILVER_RIDES_TABLE = f"{DELTA_SILVER_PATH}/rides_clean"
 SILVER_DRIVERS_TABLE = f"{DELTA_SILVER_PATH}/drivers_clean"
 SILVER_PAYMENTS_TABLE = f"{DELTA_SILVER_PATH}/payments_clean"
 
+# Historical NYC TLC data — kept separate from the live synthetic rides_clean table.
+# NYC zone buckets (zone_A..zone_E) are a different taxonomy from the simulator's
+# named zones (airport, cbd, mall, railway_station, residential) and would corrupt
+# city_zone grouping in the live dashboard/data-quality checks if merged together.
+SILVER_RIDES_HISTORICAL_NYC_TABLE = f"{DELTA_SILVER_PATH}/rides_historical_nyc"
+
 GOLD_HOURLY_KPIS_TABLE = f"{DELTA_GOLD_PATH}/hourly_kpis"
 GOLD_ZONE_DEMAND_TABLE = f"{DELTA_GOLD_PATH}/zone_demand"
+GOLD_ZONE_DEMAND_HISTORICAL_NYC_TABLE = f"{DELTA_GOLD_PATH}/zone_demand_historical_nyc"
