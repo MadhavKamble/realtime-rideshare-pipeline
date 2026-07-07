@@ -1,3 +1,6 @@
+"""Custom Airflow operators for Delta MERGE and VACUUM. Currently unused by active DAGs —
+retained as reference implementations. Would require PySpark in the Airflow container to
+activate, which contradicts the deltalake-only design decision."""
 from __future__ import annotations
 
 from typing import Any
